@@ -1,0 +1,75 @@
+language: rust
+rust: nightly
+cache:
+  - cargo
+git:
+  depth: 1
+
+addons:
+  apt:
+    packages:
+      - gcc-multilib
+
+env:
+  global:
+    - FMT_VERSION=nightly-2018-08-13
+    - CLIPPY_VERSION=nightly-2018-08-13
+    - DOCS_RS_VERSION=nightly-2018-06-03 # https://github.com/onur/docs.rs/blob/32102ce458b34f750ef190182116d9583491a64b/Vagrantfile#L50
+
+matrix:
+  include:
+    - os: linux
+      dist: precise
+      env: BUILD="" RUN="x86_64-unknown-linux-gnu i686-unknown-linux-gnu x86_64-unknown-linux-musl i686-unknown-linux-musl" RUSTFLAGS_VARIATIONS=";" DIST="precise" # ;-Cpanic=abort;-Clinker=gold
+    - os: linux
+      dist: trusty
+      sudo: false
+      env: BUILD="" RUN="x86_64-unknown-linux-gnu i686-unknown-linux-gnu x86_64-unknown-linux-musl i686-unknown-linux-musl" RUSTFLAGS_VARIATIONS=";" DIST="trusty" # ;-Cpanic=abort;-Clinker=gold
+    - os: linux
+      dist: trusty
+      sudo: required # https://docs.travis-ci.com/user/reference/overview/
+      env: BUILD="" RUN="x86_64-unknown-linux-gnu i686-unknown-linux-gnu x86_64-unknown-linux-musl i686-unknown-linux-musl" RUSTFLAGS_VARIATIONS=";" DIST="trusty" # ;-Cpanic=abort;-Clinker=gold
+    - os: osx
+      osx_image: xcode6.4 # https://docs.travis-ci.com/user/reference/osx/
+      env: BUILD="x86_64-unknown-linux-musl i686-unknown-linux-musl" RUN="x86_64-apple-darwin i686-apple-darwin" RUSTFLAGS_VARIATIONS=";" # https://github.com/rust-lang/rust/pull/49219 ;-Cpanic=abort
+    - os: osx
+      osx_image: xcode8.3
+      env: BUILD="x86_64-unknown-linux-musl i686-unknown-linux-musl" RUN="x86_64-apple-darwin i686-apple-darwin" RUSTFLAGS_VARIATIONS=";" # ;-Cpanic=abort
+    - os: osx
+      osx_image: xcode9.4
+      env: BUILD="x86_64-unknown-linux-musl i686-unknown-linux-musl" RUN="x86_64-apple-darwin i686-apple-darwin" RUSTFLAGS_VARIATIONS=";" # ;-Cpanic=abort
+
+before_script: |
+  ( set -o errexit;set -o pipefail; set -o xtrace;set -o nounset;
+    for TARGET in $BUILD $RUN; do [ "$TARGET" = $(rustup target list | grep default | grep -o -e '^[^ ]\+') ] || travis_retry rustup target add "$TARGET"; done
+    travis_retry rustup toolchain add $FMT_VERSION
+    travis_retry rustup toolchain add $CLIPPY_VERSION
+    travis_retry rustup component add rustfmt-preview --toolchain $FMT_VERSION
+    travis_retry rustup component add clippy-preview --toolchain $CLIPPY_VERSION
+    travis_retry rustup toolchain add $DOCS_RS_VERSION
+    for TARGET in $BUILD $RUN; do [ "$TARGET" = $(rustup target list | grep default | grep -o -e '^[^ ]\+') ] || travis_retry rustup target add --toolchain $DOCS_RS_VERSION "$TARGET"; done
+  )
+script: |
+  ( set -o errexit;set -o pipefail; set -o xtrace;set -o nounset;
+    cargo +$FMT_VERSION fmt -- --check
+    cargo +$CLIPPY_VERSION clippy -- -D warnings
+    OLD_IFS=$IFS IFS=";"; for RUSTFLAGS in $RUSTFLAGS_VARIATIONS; do ( IFS=$OLD_IFS
+      export RUSTFLAGS
+      for TARGET in $BUILD $RUN; do (
+        [ \( "$TRAVIS_OS_NAME" = "osx" -o \( "$TRAVIS_OS_NAME" = "linux" -a "${DIST-}" = "precise" \) \) -a \( "$TARGET" = "x86_64-unknown-linux-musl" -o "$TARGET" = "i686-unknown-linux-musl" \) ] && exit 0 # RUSTFLAGS="$RUSTFLAGS -C linker=rust-lld -Z linker-flavor=ld.lld" https://github.com/rust-lang/rust/issues/52634
+        cargo build --verbose --target "$TARGET" --lib --tests
+        cargo build --verbose --target "$TARGET" --lib --tests --release
+      ); done
+      for TARGET in $RUN; do (
+        [ \( "$TRAVIS_OS_NAME" = "osx" -o \( "$TRAVIS_OS_NAME" = "linux" -a "${DIST-}" = "precise" \) \) -a \( "$TARGET" = "x86_64-unknown-linux-musl" -o "$TARGET" = "i686-unknown-linux-musl" \) ] && exit 0 # RUSTFLAGS="$RUSTFLAGS -C linker=rust-lld -Z linker-flavor=ld.lld"
+        RUST_BACKTRACE=full cargo test --target "$TARGET"
+        RUST_BACKTRACE=full cargo test --target "$TARGET" --release
+      ); done
+    ); done; IFS=$OLD_IFS
+    for TARGET in $BUILD $RUN; do
+      cargo +$DOCS_RS_VERSION doc --no-deps --target "$TARGET" --release &>/dev/null
+    done
+  )
+
+notifications:
+  email: false
