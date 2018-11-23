@@ -13,9 +13,9 @@ addons:
 
 env:
   global:
-    - FMT_VERSION=nightly-2018-10-14
-    - CLIPPY_VERSION=nightly-2018-10-14
-    - DOCS_RS_VERSION=nightly-2018-10-14 # should be nightly-2018-06-03 but packed_simd fails https://github.com/onur/docs.rs/blob/32102ce458b34f750ef190182116d9583491a64b/Vagrantfile#L50
+    - FMT_VERSION=nightly-2018-11-23
+    - CLIPPY_VERSION=nightly-2018-11-23
+    - DOCS_RS_VERSION=nightly-2018-10-20 # https://github.com/rust-lang/docs.rs/blob/084f76241f148ffeb8f9ddd900fcda2908a09f56/Vagrantfile#L50
 
 matrix:
   include:
