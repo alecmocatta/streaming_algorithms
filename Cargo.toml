@@ -24,5 +24,5 @@ nightly = ["packed_simd"]
 [dependencies]
 twox-hash = "1.1"
 serde = { version = "1.0", features = ["derive"] }
-rand = { version = "0.7", features = ["small_rng"] }
+rand = { version = "0.8", features = ["small_rng"] }
 packed_simd = { version = "0.3", features = ["into_bits"], optional = true }
