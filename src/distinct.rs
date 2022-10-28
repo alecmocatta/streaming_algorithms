@@ -417,6 +417,21 @@ where
 			.finish()
 	}
 }
+
+impl<V: ?Sized> PartialEq for HyperLogLog<V>
+where
+	V: Hash,
+{
+	fn eq(&self, other: &Self) -> bool {
+		self.alpha == other.alpha
+			&& self.zero == other.zero
+			&& self.sum == other.sum
+			&& self.p == other.p
+			&& self.m == other.m
+			&& self.marker == other.marker
+	}
+}
+
 impl<V: ?Sized> New for HyperLogLog<V>
 where
 	V: Hash,
