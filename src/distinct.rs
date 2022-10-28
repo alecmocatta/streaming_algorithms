@@ -432,6 +432,8 @@ where
 	}
 }
 
+impl<V: ?Sized> Eq for HyperLogLog<V> where V: Hash {}
+
 impl<V: ?Sized> New for HyperLogLog<V>
 where
 	V: Hash,
