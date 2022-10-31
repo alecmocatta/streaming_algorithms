@@ -59,7 +59,7 @@ use self::consts::{BIAS_DATA, RAW_ESTIMATE_DATA, TRESHOLD_DATA};
 /// Like [`HyperLogLog`] but implements `Ord` and `Eq` by using the estimate of the cardinality.
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct HyperLogLogMagnitude<V>(HyperLogLog<V>);
+pub struct HyperLogLogMagnitude<V>(pub HyperLogLog<V>);
 impl<V: Hash> Ord for HyperLogLogMagnitude<V> {
 	#[inline(always)]
 	fn cmp(&self, other: &Self) -> Ordering {
