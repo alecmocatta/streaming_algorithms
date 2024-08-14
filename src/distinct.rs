@@ -59,6 +59,7 @@ use self::consts::{BIAS_DATA, RAW_ESTIMATE_DATA, TRESHOLD_DATA};
 /// Like [`HyperLogLog`] but implements `Ord` and `Eq` by using the estimate of the cardinality.
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct HyperLogLogMagnitude<V>(HyperLogLog<V>);
 impl<V: Hash> Ord for HyperLogLogMagnitude<V> {
 	#[inline(always)]
@@ -127,6 +128,7 @@ impl<V> IntersectPlusUnionIsPlus for HyperLogLogMagnitude<V> {
 /// See [*HyperLogLog: the analysis of a near-optimal cardinality estimation algorithm*](http://algo.inria.fr/flajolet/Publications/FlFuGaMe07.pdf) and [*HyperLogLog in Practice: Algorithmic Engineering of a State of The Art Cardinality Estimation Algorithm*](https://ai.google/research/pubs/pub40671) for background on HyperLogLog with bias correction.
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct HyperLogLog<V: ?Sized> {
 	alpha: f64,
 	zero: usize,
@@ -166,6 +168,29 @@ where
 			m: vec![0; hll.m.len()].into_boxed_slice(),
 			marker: PhantomData,
 		}
+	}
+
+	/// Returns the current harmonic sum of the `HyperLogLog` data structure.
+	/// 
+	/// The harmonic sum is the sum of the reciprocals of the registers, i.e.
+	/// `1/2^m[0] + 1/2^m[1] + ... + 1/2^m[n-1]`.
+	pub fn harmonic_sum(&self) -> f64 {
+		self.sum
+	}
+
+	/// Returns the current number of zero registers in the `HyperLogLog` data structure.
+	pub fn zero_registers(&self) -> usize {
+		self.zero
+	}
+
+	/// Returns the number of registers in the `HyperLogLog` data structure.
+	pub fn number_of_registers(&self) -> usize {
+		self.m.len()
+	}
+
+	/// Returns the precision of the `HyperLogLog` data structure.
+	pub fn precision(&self) -> u8 {
+		self.p
 	}
 
 	/// "Visit" an element.
@@ -337,7 +362,7 @@ where
 	}
 
 	fn get_alpha(p: u8) -> f64 {
-		assert!(4 <= p && p <= 16);
+		assert!(4 <= p && p <= 18);
 		match p {
 			4 => 0.673,
 			5 => 0.697,

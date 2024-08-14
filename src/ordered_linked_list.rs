@@ -4,6 +4,7 @@ use std::{ops, ptr};
 use crate::linked_list::{LinkedList, LinkedListIndex};
 
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct OrderedLinkedListIndex<'a>(LinkedListIndex<'a>);
 impl<'a> OrderedLinkedListIndex<'a> {
 	#[inline(always)]
@@ -13,6 +14,7 @@ impl<'a> OrderedLinkedListIndex<'a> {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct OrderedLinkedList<T>(LinkedList<T>);
 impl<T: Ord> OrderedLinkedList<T> {
 	pub fn new(cap: usize) -> Self {

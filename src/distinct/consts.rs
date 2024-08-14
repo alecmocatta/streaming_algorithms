@@ -42,6 +42,16 @@ mod test {
 			ret
 		})
 	}
+
+	#[test]
+	fn test_length_compatability() {
+		assert_eq!(TRESHOLD_DATA.len(), RAW_ESTIMATE_DATA.len());
+		assert_eq!(RAW_ESTIMATE_DATA.len(), BIAS_DATA.len());
+
+		for (raw_estimate_data, bias_data) in RAW_ESTIMATE_DATA.iter().zip(BIAS_DATA.iter()) {
+			assert_eq!(raw_estimate_data.len(), bias_data.len());
+		}
+	}
 }
 
 #[rustfmt::skip]

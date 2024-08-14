@@ -37,6 +37,7 @@ use crate::{
 	serialize = "A: Hash + Eq + Serialize, C: Serialize, <C as New>::Config: Serialize",
 	deserialize = "A: Hash + Eq + Deserialize<'de>, C: Deserialize<'de>, <C as New>::Config: Deserialize<'de>"
 ))]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct Top<A, C: New> {
 	map: HashMap<A, OrderedLinkedListIndex<'static>, RandomXxHashBuilder>,
 	list: OrderedLinkedList<Node<A, C>>,
@@ -227,6 +228,7 @@ impl<
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 struct Node<T, C>(T, C);
 impl<T, C: Ord> Ord for Node<T, C> {
 	#[inline(always)]
@@ -280,6 +282,7 @@ mod test {
 
 	#[derive(Serialize, Deserialize)]
 	#[serde(bound = "")]
+	#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 	struct HLL<V>(HyperLogLog<V>);
 	impl<V: Hash> Ord for HLL<V> {
 		#[inline(always)]

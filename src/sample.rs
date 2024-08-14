@@ -4,6 +4,7 @@ use std::{convert::TryFrom, fmt, iter, ops, vec};
 
 /// Given population and sample sizes, returns true if this element is in the sample. Without replacement.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct SampleTotal {
 	total: usize,
 	samples: usize,
@@ -39,6 +40,7 @@ impl Drop for SampleTotal {
 }
 
 #[derive(Clone)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 struct FixedCapVec<T>(Vec<T>);
 impl<T> FixedCapVec<T> {
 	fn new(cap: usize) -> Self {
@@ -122,6 +124,7 @@ where
 
 /// [Reservoir sampling](https://en.wikipedia.org/wiki/Reservoir_sampling). Without replacement, and the returned order is unstable.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct SampleUnstable<T> {
 	reservoir: FixedCapVec<T>,
 	i: usize,

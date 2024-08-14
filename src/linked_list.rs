@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::{iter, marker, ops};
 
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct LinkedListIndex<'a>(usize, marker::PhantomData<&'a ()>);
 impl<'a> LinkedListIndex<'a> {
 	#[inline(always)]
@@ -11,6 +12,7 @@ impl<'a> LinkedListIndex<'a> {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct LinkedList<T> {
 	vec: Box<[(usize, usize, Option<T>)]>,
 	head: usize,
@@ -303,6 +305,7 @@ impl<'a, T> ops::IndexMut<LinkedListIndex<'a>> for LinkedList<T> {
 		self.vec[index.0].2.as_mut().unwrap()
 	}
 }
+
 
 pub struct LinkedListIter<'a, T: 'a> {
 	linked_list: &'a LinkedList<T>,

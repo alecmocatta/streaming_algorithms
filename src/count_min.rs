@@ -39,6 +39,7 @@ use crate::traits::{Intersect, IntersectPlusUnionIsPlus, New, UnionAssign};
 	serialize = "C: Serialize, <C as New>::Config: Serialize",
 	deserialize = "C: Deserialize<'de>, <C as New>::Config: Deserialize<'de>"
 ))]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct CountMinSketch<K: ?Sized, C: New> {
 	counters: Vec<Vec<C>>,
 	offsets: Vec<usize>, // to avoid malloc/free each push
