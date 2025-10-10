@@ -1,3 +1,4 @@
+#![cfg_attr(feature = "stdsimd", feature(portable_simd))]
 //! SIMD-accelerated implementations of various [streaming algorithms](https://en.wikipedia.org/wiki/Streaming_algorithm).
 //!
 //! <p style="font-family: 'Fira Sans',sans-serif;padding:0.3em 0"><strong>

@@ -41,11 +41,11 @@ impl<T: Ord> OrderedLinkedList<T> {
 		assert_eq!(count, self.0.len());
 	}
 	#[inline(always)]
-	pub fn head(&self) -> Option<OrderedLinkedListIndex> {
+	pub fn head(&self) -> Option<OrderedLinkedListIndex<'_>> {
 		self.0.head().map(OrderedLinkedListIndex)
 	}
 	#[inline(always)]
-	pub fn tail(&self) -> Option<OrderedLinkedListIndex> {
+	pub fn tail(&self) -> Option<OrderedLinkedListIndex<'_>> {
 		self.0.tail().map(OrderedLinkedListIndex)
 	}
 	#[inline(always)]
@@ -56,7 +56,7 @@ impl<T: Ord> OrderedLinkedList<T> {
 	pub fn capacity(&self) -> usize {
 		self.0.capacity()
 	}
-	pub fn push_back(&mut self, t: T) -> OrderedLinkedListIndex {
+	pub fn push_back(&mut self, t: T) -> OrderedLinkedListIndex<'_> {
 		if self.0.len() == 0 {
 			return OrderedLinkedListIndex(self.0.push_back(t));
 		}
@@ -74,7 +74,7 @@ impl<T: Ord> OrderedLinkedList<T> {
 		self.assert();
 		ret
 	}
-	pub fn push_front(&mut self, t: T) -> OrderedLinkedListIndex {
+	pub fn push_front(&mut self, t: T) -> OrderedLinkedListIndex<'_> {
 		if self.0.len() == 0 {
 			return OrderedLinkedListIndex(self.0.push_front(t));
 		}
@@ -144,12 +144,12 @@ impl<T: Ord> OrderedLinkedList<T> {
 	}
 	pub fn insert_after(
 		&mut self, _index: OrderedLinkedListIndex, _t: T,
-	) -> OrderedLinkedListIndex {
+	) -> OrderedLinkedListIndex<'_> {
 		unimplemented!()
 	}
 	pub fn insert_before(
 		&mut self, _index: OrderedLinkedListIndex, _t: T,
-	) -> OrderedLinkedListIndex {
+	) -> OrderedLinkedListIndex<'_> {
 		unimplemented!()
 	}
 	#[inline(always)]
