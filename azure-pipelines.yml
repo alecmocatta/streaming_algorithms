@@ -20,7 +20,7 @@ jobs:
     endpoint: alecmocatta
     default:
       rust_toolchain: stable nightly
-      rust_lint_toolchain: nightly-2020-07-12
+      rust_lint_toolchain: nightly-2025-10-09
       rust_flags: ''
       rust_features: ''
       rust_target_check: 'aarch64-unknown-linux-gnu aarch64-unknown-linux-musl'
