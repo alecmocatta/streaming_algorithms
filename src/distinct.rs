@@ -1,6 +1,6 @@
 // This file includes source code from https://github.com/jedisct1/rust-hyperloglog/blob/36d73a2c0a324f4122d32febdb19dd4a815147f0/src/hyperloglog/lib.rs under the following BSD 2-Clause "Simplified" License:
 //
-// Copyright (c) 2013-20125, Frank Denis and Jianshu Zhao
+// Copyright (c) 2013-2025, Frank Denis and Jianshu Zhao
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification,
