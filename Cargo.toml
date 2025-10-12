@@ -18,6 +18,7 @@ edition = "2018"
 azure-devops = { project = "alecmocatta/streaming_algorithms", pipeline = "tests", build = "16" }
 maintenance = { status = "actively-developed" }
 
+
 [features]
 stdsimd = []
 assert = []
