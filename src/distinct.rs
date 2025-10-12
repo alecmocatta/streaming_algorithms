@@ -430,9 +430,8 @@ impl<V: ?Sized> IntersectPlusUnionIsPlus for HyperLogLog<V> {
 #[cfg(feature = "stdsimd")]
 mod simd_portable {
 	use std::simd::{
-		prelude::{SimdFloat, SimdOrd, SimdPartialEq}, LaneCount, Simd, SupportedLaneCount
+		num::SimdUint, prelude::{SimdFloat, SimdOrd, SimdPartialEq}, LaneCount, Simd, SupportedLaneCount
 	};
-	use std::simd::num::SimdUint;
 
 	#[inline]
 	fn powbits_sum_f32<const N: usize>(v: Simd<u8, N>) -> f64
