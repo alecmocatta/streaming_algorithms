@@ -197,7 +197,7 @@ where
 		let new = cmp::max(old, rho);
 		self.zero -= if old == 0 { 1 } else { 0 };
 
-		// accumulate 2^-register via bit trick
+		// accumulate 2^-register via bit trick.
 		self.sum -= f64::from_bits(u64::MAX.wrapping_sub(u64::from(old)) << 54 >> 2)
 			- f64::from_bits(u64::MAX.wrapping_sub(u64::from(new)) << 54 >> 2);
 
