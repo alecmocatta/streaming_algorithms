@@ -157,14 +157,30 @@ where
 	pub fn new(error_rate: f64) -> Self {
 		assert!(0.0 < error_rate && error_rate < 1.0);
 		let p = f64_to_u8((f64::log2(1.04 / error_rate) * 2.0).ceil());
-		assert!(0 < p && p < 64);
+		// Clamp/validate against supported tables:
+		assert!(
+			(4..=16).contains(&p),
+			"computed p={} from error_rate is outside supported range [4,16]",
+			p
+		);
+		Self::with_p(p)
+	}
+
+	/// Create an empty HLL with exactly 2^p registers.
+	pub fn with_p(p: u8) -> Self {
+		// Keep in sync with your bias/threshold tables
+		assert!(
+			(4..=16).contains(&p),
+			"p out of supported range for bias/threshold tables (have 4..=16)"
+		);
+		let m = 1usize << p;
 		let alpha = Self::get_alpha(p);
 		Self {
 			alpha,
-			zero: 1 << p,
-			sum: f64::from(1 << p),
+			zero: m,
+			sum: m as f64,
 			p,
-			m: vec![0; 1 << p].into_boxed_slice(),
+			m: vec![0u8; m].into_boxed_slice(),
 			marker: PhantomData,
 		}
 	}
@@ -203,6 +219,26 @@ where
 
 		*mjr = new;
 	}
+	/// Update HLL with an already-uniform 64-bit hash
+    pub fn push_hash64(&mut self, x: u64) {
+        let j = (x & ((self.m.len() as u64) - 1)) as usize;
+        let w = x >> self.p;
+        let rho = Self::get_rho(w, 64 - self.p);
+
+        let mjr = &mut self.m[j];
+        let old = *mjr;
+        let new = old.max(rho);
+
+        if old == 0 {
+            self.zero -= 1;
+        }
+
+        // subtract 2^-old and add 2^-new (same bithack used in `push`)
+        self.sum -= f64::from_bits(u64::MAX.wrapping_sub(old as u64) << 54 >> 2)
+                 - f64::from_bits(u64::MAX.wrapping_sub(new as u64) << 54 >> 2);
+
+        *mjr = new;
+    }
 
 	/// Estimated cardinality.
 	pub fn len(&self) -> f64 {
@@ -581,5 +617,35 @@ mod test {
 		}
 		assert!(hll.len() > (actual - (actual * p * 3.0)));
 		assert!(hll.len() < (actual + (actual * p * 3.0)));
+	}
+	#[test]
+	fn push_hash64() {
+		use std::hash::Hash;
+		use xxhash_rust::xxh3::Xxh3;
+		use std::hash::Hasher;
+
+		// Same precision for both sketches
+		let mut h_from_val = HyperLogLog::new(0.01);
+		let mut h_from_hash = HyperLogLog::new_from(&h_from_val);
+
+		// Feed 10k distinct items both ways:
+		//  - h_from_val: via `push(&value)` (internally hashes with Xxh3)
+		//  - h_from_hash: via `push_hash64(x)` where x is the same Xxh3 hash
+		for i in 0u64..10_000 {
+			let mut hasher = Xxh3::default();
+			i.hash(&mut hasher);
+			let x = hasher.finish();
+
+			h_from_val.push(&i);
+			h_from_hash.push_hash64(x);
+		}
+
+		let a = h_from_val.len();
+		let b = h_from_hash.len();
+
+		// They should be identical (same registers updated in the same order).
+		assert!((a - b).abs() < f64::EPSILON, "len mismatch: a={a}, b={b}");
+		// Quick sanity: ballpark distinct count is close to 10k
+		assert!(a > 9000.0 && a < 11000.0, "unexpected estimate: {a}");
 	}
 }
