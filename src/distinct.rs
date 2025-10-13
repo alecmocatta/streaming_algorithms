@@ -356,7 +356,7 @@ where
 	}
 
 	#[cfg(feature = "serde")]
-	/// Serialize this HLL to a writer using bincode (stream-safe).
+	/// Serialize this HLL to a writer using bincode.
 	pub fn save<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
 		bincode::serialize_into(&mut writer, &self)
 			.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
