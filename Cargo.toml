@@ -21,9 +21,11 @@ maintenance = { status = "actively-developed" }
 [features]
 stdsimd = []
 assert = []
+serde = []
 
 [dependencies]
 twox-hash = "1.1"
 xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
 serde = { version = "1.0", features = ["derive"] }
 rand = { version = "0.7", features = ["small_rng"] }
+bincode = "1"

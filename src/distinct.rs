@@ -355,6 +355,45 @@ where
 		bias_vector[neighbors].iter().sum::<f64>() / 6.0_f64
 	}
 
+	#[cfg(feature = "serde")]
+	/// Serialize this HLL to a writer using bincode (stream-safe).
+	pub fn save<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
+		bincode::serialize_into(&mut writer, &self)
+			.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+	}
+
+	#[cfg(feature = "serde")]
+	/// Load an HLL from a reader using bincode, with basic validation.
+	pub fn load<R: std::io::Read>(mut reader: R) -> std::io::Result<Self> {
+		let mut sketch: Self = bincode::deserialize_from(&mut reader)
+			.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+		// Validate p and register array length
+		if !(4..=16).contains(&sketch.p) {
+			return Err(std::io::Error::new(
+				std::io::ErrorKind::InvalidData,
+				format!("invalid p={} (expected 4..=16)", sketch.p),
+			));
+		}
+		let expected_m = 1usize << sketch.p;
+		if sketch.m.len() != expected_m {
+			return Err(std::io::Error::new(
+				std::io::ErrorKind::InvalidData,
+				format!("state length {} does not match 2^p ({})", sketch.m.len(), expected_m),
+			));
+		}
+
+		// Recompute derived fields for consistency with register state.
+		sketch.alpha = Self::get_alpha(sketch.p);
+		sketch.zero = sketch.m.iter().filter(|&&r| r == 0).count();
+		sketch.sum = sketch
+			.m
+			.iter()
+			.map(|&r| f64::from_bits(u64::MAX.wrapping_sub(r as u64) << 54 >> 2))
+			.sum::<f64>();
+
+		Ok(sketch)
+	}
 	fn get_nearest_neighbors(e: f64, estimate_vector: &[f64]) -> Range<usize> {
 		let index = estimate_vector
 			.binary_search_by(|a| a.partial_cmp(&e).unwrap_or(Ordering::Equal))
@@ -647,5 +686,48 @@ mod test {
 		assert!((a - b).abs() < f64::EPSILON, "len mismatch: a={a}, b={b}");
 		// Quick sanity: ballpark distinct count is close to 10k
 		assert!(a > 9000.0 && a < 11000.0, "unexpected estimate: {a}");
+	}
+	#[cfg(feature = "serde")]
+	#[test]
+	fn hll_save_and_load_roundtrip() {
+		use std::fs::{remove_file, File};
+		use std::io::{BufReader, BufWriter};
+
+		// Build a sketch and feed it some items
+		let mut hll = HyperLogLog::with_p(12); // 4096 registers, ~1.6% RSE
+		for i in 0u64..10_000 {
+			hll.push(&i);
+		}
+		let est_before = hll.len();
+
+		// Save to disk
+		let path = "test_hll.bin";
+		{
+			let f = File::create(path).expect("create file");
+			let w = BufWriter::new(f);
+			hll.save(w).expect("save hll");
+		}
+
+		// Load back
+		let loaded = {
+			let f = File::open(path).expect("open file");
+			let r = BufReader::new(f);
+			HyperLogLog::<u8>::load(r).expect("load hll") // the V type is phantom; any V is fine
+		};
+
+		// Registers should match exactly
+		assert_eq!(loaded.p, hll.p);
+		assert_eq!(loaded.m.len(), hll.m.len());
+		assert_eq!(&*loaded.m, &*hll.m, "register arrays differ after load");
+
+		// Estimate should be (very) close; allow a tiny FP drift
+		let est_after = loaded.len();
+		let diff = (est_after - est_before).abs();
+		assert!(
+			diff <= 1e-12,
+			"estimate drift too large: before={est_before}, after={est_after}, diff={diff}"
+		);
+
+		remove_file(path).ok();
 	}
 }
