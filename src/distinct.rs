@@ -365,25 +365,42 @@ where
 	#[cfg(feature = "serde")]
 	/// Load an HLL from a reader using bincode, with basic validation.
 	pub fn load<R: std::io::Read>(mut reader: R) -> std::io::Result<Self> {
-		let mut sketch: Self = bincode::deserialize_from(&mut reader)
-			.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+		use std::io;
+		use bincode::ErrorKind as BinErr;
 
-		// Validate p and register array length
+		// 1) Deserialize and propagate IO kinds (including UnexpectedEof)
+		let mut sketch: Self = match bincode::deserialize_from::<_, Self>(&mut reader) {
+			Ok(s) => s,
+			Err(e) => {
+				match *e {
+					BinErr::Io(ref ioe) => {
+						// Recreate an io::Error with the same kind & message.
+						return Err(io::Error::new(ioe.kind(), ioe.to_string()));
+					}
+					_ => {
+						// Non-IO bincode error.
+						return Err(io::Error::new(io::ErrorKind::Other, e));
+					}
+				}
+			}
+		};
+
+		// 2) Validate p and register length
 		if !(4..=16).contains(&sketch.p) {
-			return Err(std::io::Error::new(
-				std::io::ErrorKind::InvalidData,
+			return Err(io::Error::new(
+				io::ErrorKind::InvalidData,
 				format!("invalid p={} (expected 4..=16)", sketch.p),
 			));
 		}
 		let expected_m = 1usize << sketch.p;
 		if sketch.m.len() != expected_m {
-			return Err(std::io::Error::new(
-				std::io::ErrorKind::InvalidData,
+			return Err(io::Error::new(
+				io::ErrorKind::InvalidData,
 				format!("state length {} does not match 2^p ({})", sketch.m.len(), expected_m),
 			));
 		}
 
-		// Recompute derived fields for consistency with register state.
+		// 3) Recompute derived fields from the registers
 		sketch.alpha = Self::get_alpha(sketch.p);
 		sketch.zero = sketch.m.iter().filter(|&&r| r == 0).count();
 		sketch.sum = sketch
@@ -394,6 +411,7 @@ where
 
 		Ok(sketch)
 	}
+
 	fn get_nearest_neighbors(e: f64, estimate_vector: &[f64]) -> Range<usize> {
 		let index = estimate_vector
 			.binary_search_by(|a| a.partial_cmp(&e).unwrap_or(Ordering::Equal))
@@ -600,7 +618,7 @@ use simd_portable::{simd_intersect_assign, simd_union_assign};
 mod test {
 	use super::{super::f64_to_usize, HyperLogLog};
 	use std::f64;
-
+	use std::io::Write;
 	#[test]
 	fn pow_bithack() {
 		for x in 0_u8..65 {
@@ -729,5 +747,80 @@ mod test {
 		);
 
 		remove_file(path).ok();
+	}
+	#[cfg(feature = "serde")]
+	#[test]
+	fn hll_save_two_then_load_back_streaming_cardinality() -> std::io::Result<()> {
+		use super::HyperLogLog;
+		use std::fs::{remove_file, File};
+		use std::io::{BufReader, BufWriter};
+
+		// Two sketches with 2^12 registers
+		let mut s1 = HyperLogLog::<u64>::with_p(12);
+		let mut s2 = HyperLogLog::<u64>::with_p(12);
+
+		// s1: 0..10_000 (10k uniques)
+		for i in 0u64..10_000 {
+			s1.push(&i);
+		}
+		// s2: 5_000..15_000 (10k uniques), 5k overlap with s1
+		for i in 5_000u64..15_000 {
+			s2.push(&i);
+		}
+
+		// Ground-truth cardinalities
+		let t1 = 10_000.0;
+		let t2 = 10_000.0;
+		let tu = 15_000.0;
+		let rel_tol = 0.05; // 5% tolerance (>> ~1.6% RSE for p=12)
+
+		// Check before saving
+		let e1 = s1.len();
+		let e2 = s2.len();
+		let mut u = s1.clone();
+		u.union(&s2);
+		let eu = u.len();
+
+		assert!((e1 - t1).abs() <= t1 * rel_tol, "s1 est={} truth={}", e1, t1);
+		assert!((e2 - t2).abs() <= t2 * rel_tol, "s2 est={} truth={}", e2, t2);
+		assert!((eu - tu).abs() <= tu * rel_tol, "union est={} truth={}", eu, tu);
+
+		// Save both sketches back-to-back
+		let path = "test_hll_stream_two_card.bin";
+		{
+			let f = File::create(path)?;
+			let mut w = BufWriter::new(f);
+			s1.save(&mut w)?;
+			s2.save(&mut w)?;
+			w.flush()?;
+		}
+
+		// Load both back
+		let (s1b, s2b) = {
+			let f = File::open(path)?;
+			let mut r = BufReader::new(f);
+			let a = HyperLogLog::<u64>::load(&mut r)?;
+			let b = HyperLogLog::<u64>::load(&mut r)?;
+			(a, b)
+		};
+
+		// Check after loading (still close to truth)...
+		let e1b = s1b.len();
+		let e2b = s2b.len();
+		let mut ub = s1b.clone();
+		ub.union(&s2b);
+		let eub = ub.len();
+
+		assert!((e1b - t1).abs() <= t1 * rel_tol, "s1(load) est={} truth={}", e1b, t1);
+		assert!((e2b - t2).abs() <= t2 * rel_tol, "s2(load) est={} truth={}", e2b, t2);
+		assert!((eub - tu).abs() <= tu * rel_tol, "union(load) est={} truth={}", eub, tu);
+
+		// ...and unchanged by serialization
+		assert!((e1 - e1b).abs() < 1e-9, "s1 est changed by save/load");
+		assert!((e2 - e2b).abs() < 1e-9, "s2 est changed by save/load");
+		assert!((eu - eub).abs() < 1e-9, "union est changed by save/load");
+
+		remove_file(path).ok();
+		Ok(())
 	}
 }
