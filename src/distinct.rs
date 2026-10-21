@@ -268,7 +268,7 @@ where
 		// SIMD path (portable)
 		#[cfg(feature = "stdsimd")]
 		{
-			let (zero, sum) = simd_union_assign::<64>(&mut self.m, &src.m);
+			let (zero, sum) = simd_union_assign(&mut self.m, &src.m);
 			self.zero = zero;
 			self.sum = sum;
 			return;
@@ -298,7 +298,7 @@ where
 		// SIMD path (portable)
 		#[cfg(feature = "stdsimd")]
 		{
-			let (zero, sum) = simd_intersect_assign::<64>(&mut self.m, &src.m);
+			let (zero, sum) = simd_intersect_assign(&mut self.m, &src.m);
 			self.zero = zero;
 			self.sum = sum;
 			return;
@@ -523,43 +523,36 @@ impl<V: ?Sized> IntersectPlusUnionIsPlus for HyperLogLog<V> {
 #[cfg(feature = "stdsimd")]
 mod simd_portable {
 	use std::simd::{
-		num::SimdUint, prelude::{SimdFloat, SimdOrd, SimdPartialEq}, LaneCount, Simd, SupportedLaneCount
+		num::SimdUint, prelude::{SimdFloat, SimdOrd, SimdPartialEq}, Simd
 	};
 
+	const LANES: usize = 64;
+
 	#[inline]
-	fn powbits_sum_f32<const N: usize>(v: Simd<u8, N>) -> f64
-	where
-		LaneCount<N>: SupportedLaneCount,
-	{
+	fn powbits_sum_f32(v: Simd<u8, LANES>) -> f64 {
 		// ((u32::MAX - x) << 25) >> 2  -> reinterpret as f32, then sum
-		let x_u32: Simd<u32, N> = v.cast();
+		let x_u32: Simd<u32, LANES> = v.cast();
 		let t = ((Simd::splat(u32::MAX) - x_u32) << Simd::splat(25)) >> Simd::splat(2);
-		let f: Simd<f32, N> = Simd::from_bits(t);
+		let f: Simd<f32, LANES> = Simd::from_bits(t);
 		f.reduce_sum() as f64
 	}
 
 	#[inline]
-	fn zero_lanes<const N: usize>(v: Simd<u8, N>) -> usize
-	where
-		LaneCount<N>: SupportedLaneCount,
-	{
+	fn zero_lanes(v: Simd<u8, LANES>) -> usize {
 		let m = v.simd_eq(Simd::splat(0));
 		m.to_bitmask().count_ones() as usize
 	}
 
 	/// Lane-wise max (union) and recompute zero/sum.
-	pub fn simd_union_assign<const N: usize>(a: &mut [u8], b: &[u8]) -> (usize, f64)
-	where
-		LaneCount<N>: SupportedLaneCount,
-	{
-		let (a_chunks, a_rem) = a.as_chunks_mut::<N>();
-		let (b_chunks, b_rem) = b.as_chunks::<N>();
+	pub fn simd_union_assign(a: &mut [u8], b: &[u8]) -> (usize, f64) {
+		let (a_chunks, a_rem) = a.as_chunks_mut::<LANES>();
+		let (b_chunks, b_rem) = b.as_chunks::<LANES>();
 		let mut zero = 0usize;
 		let mut sum = 0.0f64;
 
 		for (aa, bb) in a_chunks.iter_mut().zip(b_chunks.iter()) {
-			let av = Simd::<u8, N>::from_array(*aa);
-			let bv = Simd::<u8, N>::from_array(*bb);
+			let av = Simd::<u8, LANES>::from_array(*aa);
+			let bv = Simd::<u8, LANES>::from_array(*bb);
 			let rv = av.simd_max(bv);
 			zero += zero_lanes(rv);
 			sum += powbits_sum_f32(rv);
@@ -579,18 +572,15 @@ mod simd_portable {
 	}
 
 	/// Lane-wise min (intersect) and recompute zero/sum.
-	pub fn simd_intersect_assign<const N: usize>(a: &mut [u8], b: &[u8]) -> (usize, f64)
-	where
-		LaneCount<N>: SupportedLaneCount,
-	{
-		let (a_chunks, a_rem) = a.as_chunks_mut::<N>();
-		let (b_chunks, b_rem) = b.as_chunks::<N>();
+	pub fn simd_intersect_assign(a: &mut [u8], b: &[u8]) -> (usize, f64) {
+		let (a_chunks, a_rem) = a.as_chunks_mut::<LANES>();
+		let (b_chunks, b_rem) = b.as_chunks::<LANES>();
 		let mut zero = 0usize;
 		let mut sum = 0.0f64;
 
 		for (aa, bb) in a_chunks.iter_mut().zip(b_chunks.iter()) {
-			let av = Simd::<u8, N>::from_array(*aa);
-			let bv = Simd::<u8, N>::from_array(*bb);
+			let av = Simd::<u8, LANES>::from_array(*aa);
+			let bv = Simd::<u8, LANES>::from_array(*bb);
 			let rv = av.simd_min(bv);
 			zero += zero_lanes(rv);
 			sum += powbits_sum_f32(rv);
@@ -822,5 +812,96 @@ mod test {
 
 		remove_file(path).ok();
 		Ok(())
+	}
+
+	fn assert_hll_register_merges(left: &HyperLogLog<u64>, right: &HyperLogLog<u64>) {
+		for intersect in [false, true] {
+			let expected: Vec<u8> = left
+				.m
+				.iter()
+				.zip(right.m.iter())
+				.map(|(&a, &b)| if intersect { a.min(b) } else { a.max(b) })
+				.collect();
+			let expected_zero = expected.iter().filter(|&&rank| rank == 0).count();
+			let expected_sum: f64 = expected
+				.iter()
+				.map(|&rank| 2.0_f64.powi(-i32::from(rank)))
+				.sum();
+			let mut actual = left.clone();
+			if intersect {
+				actual.intersect(right);
+			} else {
+				actual.union(right);
+			}
+			assert_eq!(
+				&*actual.m, &*expected,
+				"p={}, intersect={intersect}",
+				left.p
+			);
+			assert_eq!(
+				actual.zero, expected_zero,
+				"p={}, intersect={intersect}",
+				left.p
+			);
+			// SIMD reduces each chunk in f32 before accumulating into f64.
+			assert!(
+				(actual.sum - expected_sum).abs() <= expected_sum * 1e-6,
+				"p={}, intersect={intersect}: sum={} expected={expected_sum}",
+				left.p,
+				actual.sum
+			);
+		}
+	}
+
+	#[test]
+	fn hll_merge_empty_registers() {
+		for p in [4, 5, 6, 10, 16] {
+			let empty = HyperLogLog::<u64>::with_p(p);
+			assert_hll_register_merges(&empty, &empty);
+		}
+	}
+
+	#[test]
+	fn hll_merge_mixed_registers() {
+		// With 64 lanes, p=4/5 uses only the scalar tail, p>=6 only full chunks.
+		for p in [4, 5, 6, 10, 16] {
+			let empty = HyperLogLog::<u64>::with_p(p);
+			let mut left = empty.clone();
+			let mut right = empty.clone();
+			let ranks = [0, 1, 2, 3, 24, 32, 48, 65 - p];
+			for (phase, sketch) in [(0, &mut left), (3, &mut right)] {
+				for (i, rank) in sketch.m.iter_mut().enumerate() {
+					*rank = if i % 11 == 0 {
+						0
+					} else {
+						ranks[(i * 5 + phase) % ranks.len()]
+					};
+				}
+				sketch.zero = sketch.m.iter().filter(|&&rank| rank == 0).count();
+				sketch.sum = sketch
+					.m
+					.iter()
+					.map(|&rank| 2.0_f64.powi(-i32::from(rank)))
+					.sum();
+			}
+			assert_hll_register_merges(&left, &right);
+			assert_hll_register_merges(&right, &left);
+			assert_hll_register_merges(&left, &left);
+			assert_hll_register_merges(&left, &empty);
+			assert_hll_register_merges(&empty, &right);
+		}
+	}
+
+	#[test]
+	fn hll_merge_hashed_registers() {
+		for p in [4, 5, 6, 10, 16] {
+			let mut left = HyperLogLog::<u64>::with_p(p);
+			let mut right = HyperLogLog::<u64>::with_p(p);
+			for value in 0..2048_u64 {
+				left.push(&value);
+				right.push(&(value + 1024));
+			}
+			assert_hll_register_merges(&left, &right);
+		}
 	}
 }
