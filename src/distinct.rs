@@ -220,25 +220,25 @@ where
 		*mjr = new;
 	}
 	/// Update HLL with an already-uniform 64-bit hash
-    pub fn push_hash64(&mut self, x: u64) {
-        let j = (x & ((self.m.len() as u64) - 1)) as usize;
-        let w = x >> self.p;
-        let rho = Self::get_rho(w, 64 - self.p);
+	pub fn push_hash64(&mut self, x: u64) {
+		let j = (x & ((self.m.len() as u64) - 1)) as usize;
+		let w = x >> self.p;
+		let rho = Self::get_rho(w, 64 - self.p);
 
-        let mjr = &mut self.m[j];
-        let old = *mjr;
-        let new = old.max(rho);
+		let mjr = &mut self.m[j];
+		let old = *mjr;
+		let new = old.max(rho);
 
-        if old == 0 {
-            self.zero -= 1;
-        }
+		if old == 0 {
+			self.zero -= 1;
+		}
 
-        // subtract 2^-old and add 2^-new (same bithack used in `push`)
-        self.sum -= f64::from_bits(u64::MAX.wrapping_sub(old as u64) << 54 >> 2)
-                 - f64::from_bits(u64::MAX.wrapping_sub(new as u64) << 54 >> 2);
+		// subtract 2^-old and add 2^-new (same bithack used in `push`)
+		self.sum -= f64::from_bits(u64::MAX.wrapping_sub(old as u64) << 54 >> 2)
+			- f64::from_bits(u64::MAX.wrapping_sub(new as u64) << 54 >> 2);
 
-        *mjr = new;
-    }
+		*mjr = new;
+	}
 
 	/// Estimated cardinality.
 	pub fn len(&self) -> f64 {
@@ -365,8 +365,8 @@ where
 	#[cfg(feature = "serde")]
 	/// Load an HLL from a reader using bincode, with basic validation.
 	pub fn load<R: std::io::Read>(mut reader: R) -> std::io::Result<Self> {
-		use std::io;
 		use bincode::ErrorKind as BinErr;
+		use std::io;
 
 		// 1) Deserialize and propagate IO kinds (including UnexpectedEof)
 		let mut sketch: Self = match bincode::deserialize_from::<_, Self>(&mut reader) {
@@ -396,7 +396,11 @@ where
 		if sketch.m.len() != expected_m {
 			return Err(io::Error::new(
 				io::ErrorKind::InvalidData,
-				format!("state length {} does not match 2^p ({})", sketch.m.len(), expected_m),
+				format!(
+					"state length {} does not match 2^p ({})",
+					sketch.m.len(),
+					expected_m
+				),
 			));
 		}
 
@@ -439,7 +443,8 @@ where
 
 	#[inline]
 	fn ep(&self) -> f64 {
-		let e = self.alpha * usize_to_f64(self.m.len() * self.m.len()) / self.sum;
+		let m = usize_to_f64(self.m.len());
+		let e = self.alpha * m * m / self.sum;
 		if e <= usize_to_f64(5 * self.m.len()) {
 			e - Self::estimate_bias(e, self.p)
 		} else {
@@ -607,7 +612,7 @@ use simd_portable::{simd_intersect_assign, simd_union_assign};
 #[cfg(test)]
 mod test {
 	use super::{super::f64_to_usize, HyperLogLog};
-	use std::f64;
+	#[cfg(feature = "serde")]
 	use std::io::Write;
 	#[test]
 	fn pow_bithack() {
@@ -618,6 +623,19 @@ mod test {
 			assert_eq!(a, b);
 			assert_eq!(a, f64::from(c));
 		}
+	}
+
+	#[test]
+	fn hll_max_precision_estimate() {
+		let mut hll = HyperLogLog::<u64>::with_p(16);
+		// All registers at rank four put the estimate above the bias-correction
+		// range. Squaring 2^16 registers must also work on 32-bit targets.
+		hll.m.fill(4);
+		hll.zero = 0;
+		hll.sum = 4096.0;
+		let estimate = hll.len();
+		assert!(estimate.is_finite());
+		assert_eq!(estimate, hll.alpha * 1_048_576.0);
 	}
 
 	#[test]
@@ -667,9 +685,8 @@ mod test {
 	}
 	#[test]
 	fn push_hash64() {
-		use std::hash::Hash;
+		use std::hash::{Hash, Hasher};
 		use xxhash_rust::xxh3::Xxh3;
-		use std::hash::Hasher;
 
 		// Same precision for both sketches
 		let mut h_from_val = HyperLogLog::new(0.01);
@@ -698,8 +715,9 @@ mod test {
 	#[cfg(feature = "serde")]
 	#[test]
 	fn hll_save_and_load_roundtrip() {
-		use std::fs::{remove_file, File};
-		use std::io::{BufReader, BufWriter};
+		use std::{
+			fs::{remove_file, File}, io::{BufReader, BufWriter}
+		};
 
 		// Build a sketch and feed it some items
 		let mut hll = HyperLogLog::with_p(12); // 4096 registers, ~1.6% RSE
@@ -742,8 +760,9 @@ mod test {
 	#[test]
 	fn hll_save_two_then_load_back_streaming_cardinality() -> std::io::Result<()> {
 		use super::HyperLogLog;
-		use std::fs::{remove_file, File};
-		use std::io::{BufReader, BufWriter};
+		use std::{
+			fs::{remove_file, File}, io::{BufReader, BufWriter}
+		};
 
 		// Two sketches with 2^12 registers
 		let mut s1 = HyperLogLog::<u64>::with_p(12);
@@ -771,9 +790,24 @@ mod test {
 		u.union(&s2);
 		let eu = u.len();
 
-		assert!((e1 - t1).abs() <= t1 * rel_tol, "s1 est={} truth={}", e1, t1);
-		assert!((e2 - t2).abs() <= t2 * rel_tol, "s2 est={} truth={}", e2, t2);
-		assert!((eu - tu).abs() <= tu * rel_tol, "union est={} truth={}", eu, tu);
+		assert!(
+			(e1 - t1).abs() <= t1 * rel_tol,
+			"s1 est={} truth={}",
+			e1,
+			t1
+		);
+		assert!(
+			(e2 - t2).abs() <= t2 * rel_tol,
+			"s2 est={} truth={}",
+			e2,
+			t2
+		);
+		assert!(
+			(eu - tu).abs() <= tu * rel_tol,
+			"union est={} truth={}",
+			eu,
+			tu
+		);
 
 		// Save both sketches back-to-back
 		let path = "test_hll_stream_two_card.bin";
@@ -801,9 +835,24 @@ mod test {
 		ub.union(&s2b);
 		let eub = ub.len();
 
-		assert!((e1b - t1).abs() <= t1 * rel_tol, "s1(load) est={} truth={}", e1b, t1);
-		assert!((e2b - t2).abs() <= t2 * rel_tol, "s2(load) est={} truth={}", e2b, t2);
-		assert!((eub - tu).abs() <= tu * rel_tol, "union(load) est={} truth={}", eub, tu);
+		assert!(
+			(e1b - t1).abs() <= t1 * rel_tol,
+			"s1(load) est={} truth={}",
+			e1b,
+			t1
+		);
+		assert!(
+			(e2b - t2).abs() <= t2 * rel_tol,
+			"s2(load) est={} truth={}",
+			e2b,
+			t2
+		);
+		assert!(
+			(eub - tu).abs() <= tu * rel_tol,
+			"union(load) est={} truth={}",
+			eub,
+			tu
+		);
 
 		// ...and unchanged by serialization
 		assert!((e1 - e1b).abs() < 1e-9, "s1 est changed by save/load");
