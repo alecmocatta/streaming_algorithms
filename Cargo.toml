@@ -14,7 +14,6 @@ readme = "README.md"
 edition = "2021"
 
 [badges]
-azure-devops = { project = "alecmocatta/streaming_algorithms", pipeline = "tests", build = "16" }
 maintenance = { status = "actively-developed" }
 
 [features]
