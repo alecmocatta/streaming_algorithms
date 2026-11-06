@@ -1,28 +1,29 @@
 [package]
 name = "streaming_algorithms"
-version = "0.3.0"
+version = "0.3.3"
 license = "MIT OR Apache-2.0"
-authors = ["Alec Mocatta <alec@mocatta.net>"]
+authors = ["Alec Mocatta <alec@mocatta.net>", "Jianshu Zhao <jianshuzhao@yahoo.com>"]
 categories = ["data-structures","algorithms","science"]
 keywords = ["streaming-algorithm","probabilistic","sketch","data-structure","hyperloglog"]
 description = """
 SIMD-accelerated implementations of various streaming algorithms, including Count–min sketch, Top k, HyperLogLog, Reservoir sampling.
 """
 repository = "https://github.com/alecmocatta/streaming_algorithms"
-homepage = "https://github.com/alecmocatta/streaming_algorithms"
 documentation = "https://docs.rs/streaming_algorithms"
 readme = "README.md"
-edition = "2018"
+edition = "2021"
 
 [badges]
-azure-devops = { project = "alecmocatta/streaming_algorithms", pipeline = "tests", build = "16" }
 maintenance = { status = "actively-developed" }
 
 [features]
-nightly = ["packed_simd"]
+stdsimd = []
+assert = []
+serde = []
 
 [dependencies]
 twox-hash = "1.1"
+xxhash-rust = { version = "0.8", default-features = false, features = ["xxh3"] }
 serde = { version = "1.0", features = ["derive"] }
 rand = { version = "0.7", features = ["small_rng"] }
-packed_simd = { version = "0.3", features = ["into_bits"], optional = true }
+bincode = "1"

@@ -1,45 +1,13 @@
-trigger: ["master"]
-pr: ["master"]
-schedules:
-  - cron: "0 1 * * 0"
-    displayName: "Sunday build"
-    branches:
-      include: ["master"]
-    always: true
-
-resources:
-  repositories:
-    - repository: templates
-      type: github
-      name: alecmocatta/azure-pipeline-templates
-      endpoint: alecmocatta
+# Automatic CI testing is disabled. Manual runs finish without building or testing.
+trigger: none
+pr: none
 
 jobs:
-- template: rust.yml@templates
-  parameters:
-    endpoint: alecmocatta
-    default:
-      rust_toolchain: stable nightly
-      rust_lint_toolchain: nightly-2020-07-12
-      rust_flags: ''
-      rust_features: ''
-      rust_target_check: 'aarch64-unknown-linux-gnu aarch64-unknown-linux-musl'
-      rust_target_build: 'x86_64-unknown-linux-musl i686-unknown-linux-musl'
-      rust_target_run: ''
-    matrix:
-      windows:
-        imageName: 'windows-latest'
-        rust_target_run: 'x86_64-pc-windows-msvc i686-pc-windows-msvc x86_64-pc-windows-gnu'
-      mac0:
-        imageName: 'macos-latest'
-        rust_target_build: 'x86_64-unknown-linux-musl i686-unknown-linux-musl aarch64-apple-ios'
-        rust_target_run: 'x86_64-apple-darwin'
-      mac1:
-        imageName: 'macos-latest'
-        rust_toolchain: nightly
-        rust_features: ';nightly'
-        rust_target_build: 'x86_64-unknown-linux-musl i686-unknown-linux-musl aarch64-apple-ios'
-        rust_target_run: 'x86_64-apple-darwin'
-      linux:
-        imageName: 'ubuntu-latest'
-        rust_target_run: 'x86_64-unknown-linux-gnu i686-unknown-linux-gnu x86_64-unknown-linux-musl i686-unknown-linux-musl'
+- job: ci_disabled
+  displayName: Automated CI testing disabled
+  pool:
+    vmImage: 'ubuntu-latest'
+  steps:
+  - checkout: none
+  - bash: echo "Automated CI testing is disabled."
+    displayName: CI disabled

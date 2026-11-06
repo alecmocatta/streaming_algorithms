@@ -64,25 +64,25 @@ impl<T> FixedCapVec<T> {
 		assert_eq!(self.capacity(), cap);
 		ret
 	}
-	fn into_iter(self) -> std::vec::IntoIter<T> {
+	fn into_iter(self) -> vec::IntoIter<T> {
 		self.0.into_iter()
 	}
 }
-impl<T, Idx> std::ops::Index<Idx> for FixedCapVec<T>
+impl<T, Idx> ops::Index<Idx> for FixedCapVec<T>
 where
 	Idx: std::slice::SliceIndex<[T]>,
 {
-	type Output = <Vec<T> as std::ops::Index<Idx>>::Output;
+	type Output = <Vec<T> as ops::Index<Idx>>::Output;
 	fn index(&self, index: Idx) -> &Self::Output {
-		std::ops::Index::index(&self.0, index)
+		ops::Index::index(&self.0, index)
 	}
 }
-impl<T, Idx> std::ops::IndexMut<Idx> for FixedCapVec<T>
+impl<T, Idx> ops::IndexMut<Idx> for FixedCapVec<T>
 where
 	Idx: std::slice::SliceIndex<[T]>,
 {
 	fn index_mut(&mut self, index: Idx) -> &mut Self::Output {
-		std::ops::IndexMut::index_mut(&mut self.0, index)
+		ops::IndexMut::index_mut(&mut self.0, index)
 	}
 }
 impl<T> fmt::Debug for FixedCapVec<T>

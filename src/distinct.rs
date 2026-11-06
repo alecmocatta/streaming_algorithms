@@ -1,6 +1,6 @@
 // This file includes source code from https://github.com/jedisct1/rust-hyperloglog/blob/36d73a2c0a324f4122d32febdb19dd4a815147f0/src/hyperloglog/lib.rs under the following BSD 2-Clause "Simplified" License:
 //
-// Copyright (c) 2013-2016, Frank Denis
+// Copyright (c) 2013-2025, Frank Denis and Jianshu Zhao
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification,
@@ -26,7 +26,7 @@
 
 // This file includes source code from https://github.com/codahale/sketchy/blob/09e9ede8ac27e6fd37d5c5f53ac9b7776c37bc19/src/hyperloglog.rs under the following Apache License 2.0:
 //
-// Copyright (c) 2015-2017 Coda Hale
+// Copyright (c) 2015-2025 Coda Hale
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,11 +44,26 @@
 // https://spark.apache.org/docs/latest/api/scala/index.html#org.apache.spark.rdd.RDD countApproxDistinct
 // is_x86_feature_detected ?
 
+// This file includes source code from https://github.com/jedisct1/rust-hyperloglog/... (BSD-2)
+// and https://github.com/codahale/sketchy/... (Apache-2.0). See original headers above.
+
+// This file includes source code from https://github.com/jedisct1/rust-hyperloglog/blob/36d73a2c0a324f4122d32febdb19dd4a815147f0/src/hyperloglog/lib.rs under the BSD 2-Clause "Simplified" License.
+// This file includes source code from https://github.com/codahale/sketchy/blob/09e9ede8ac27e6fd37d5c5f53ac9b7776c37bc19/src/hyperloglog.rs under the Apache License 2.0.
+
+// https://github.com/twitter/algebird/blob/5fdb079447271a5fe0f1fba068e5f86591ccde36/algebird-core/src/main/scala/com/twitter/algebird/HyperLogLog.scala
+// https://spark.apache.org/docs/latest/api/scala/index.html#org.apache.spark.rdd.RDD countApproxDistinct
+
+// This file includes source code from https://github.com/jedisct1/rust-hyperloglog/blob/36d73a2c0a324f4122d32febdb19dd4a815147f0/src/hyperloglog/lib.rs under the BSD 2-Clause "Simplified" License.
+// This file includes source code from https://github.com/codahale/sketchy/blob/09e9ede8ac27e6fd37d5c5f53ac9b7776c37bc19/src/hyperloglog.rs under the Apache License 2.0.
+
+// https://github.com/twitter/algebird/blob/5fdb079447271a5fe0f1fba068e5f86591ccde36/algebird-core/src/main/scala/com/twitter/algebird/HyperLogLog.scala
+// https://spark.apache.org/docs/latest/api/scala/index.html#org.apache.spark.rdd.RDD countApproxDistinct
+
 use serde::{Deserialize, Serialize};
 use std::{
 	cmp::{self, Ordering}, convert::{identity, TryFrom}, fmt, hash::{Hash, Hasher}, marker::PhantomData, ops::{self, Range}
 };
-use twox_hash::XxHash;
+use xxhash_rust::xxh3::Xxh3;
 
 use super::{f64_to_u8, u64_to_f64, usize_to_f64};
 use crate::traits::{Intersect, IntersectPlusUnionIsPlus, New, UnionAssign};
@@ -56,7 +71,7 @@ use crate::traits::{Intersect, IntersectPlusUnionIsPlus, New, UnionAssign};
 mod consts;
 use self::consts::{BIAS_DATA, RAW_ESTIMATE_DATA, TRESHOLD_DATA};
 
-/// Like [`HyperLogLog`] but implements `Ord` and `Eq` by using the estimate of the cardinality.
+/// Like [`HyperLogLog`] but implements `Ord`/`Eq` by comparing estimated cardinalities.
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct HyperLogLogMagnitude<V>(HyperLogLog<V>);
@@ -122,9 +137,7 @@ impl<V> IntersectPlusUnionIsPlus for HyperLogLogMagnitude<V> {
 	const VAL: bool = <HyperLogLog<V> as IntersectPlusUnionIsPlus>::VAL;
 }
 
-/// An implementation of the [HyperLogLog](https://en.wikipedia.org/wiki/HyperLogLog) data structure with *bias correction*.
-///
-/// See [*HyperLogLog: the analysis of a near-optimal cardinality estimation algorithm*](http://algo.inria.fr/flajolet/Publications/FlFuGaMe07.pdf) and [*HyperLogLog in Practice: Algorithmic Engineering of a State of The Art Cardinality Estimation Algorithm*](https://ai.google/research/pubs/pub40671) for background on HyperLogLog with bias correction.
+/// HyperLogLog with bias correction.
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
 pub struct HyperLogLog<V: ?Sized> {
@@ -140,23 +153,39 @@ impl<V: ?Sized> HyperLogLog<V>
 where
 	V: Hash,
 {
-	/// Create an empty `HyperLogLog` data structure with the specified error tolerance.
+	/// Create an empty HLL from an error tolerance (approx relative error).
 	pub fn new(error_rate: f64) -> Self {
 		assert!(0.0 < error_rate && error_rate < 1.0);
 		let p = f64_to_u8((f64::log2(1.04 / error_rate) * 2.0).ceil());
-		assert!(0 < p && p < 64);
+		// Clamp/validate against supported tables:
+		assert!(
+			(4..=16).contains(&p),
+			"computed p={} from error_rate is outside supported range [4,16]",
+			p
+		);
+		Self::with_p(p)
+	}
+
+	/// Create an empty HLL with exactly 2^p registers.
+	pub fn with_p(p: u8) -> Self {
+		// Keep in sync with your bias/threshold tables
+		assert!(
+			(4..=16).contains(&p),
+			"p out of supported range for bias/threshold tables (have 4..=16)"
+		);
+		let m = 1usize << p;
 		let alpha = Self::get_alpha(p);
 		Self {
 			alpha,
-			zero: 1 << p,
-			sum: f64::from(1 << p),
+			zero: m,
+			sum: m as f64,
 			p,
-			m: vec![0; 1 << p].into_boxed_slice(),
+			m: vec![0u8; m].into_boxed_slice(),
 			marker: PhantomData,
 		}
 	}
 
-	/// Create an empty `HyperLogLog` data structure, copying the error tolerance from `hll`.
+	/// Create a new empty HLL using the same settings as `hll`.
 	pub fn new_from(hll: &Self) -> Self {
 		Self {
 			alpha: hll.alpha,
@@ -168,12 +197,14 @@ where
 		}
 	}
 
-	/// "Visit" an element.
+	/// Visit one element.
 	#[inline]
 	pub fn push(&mut self, value: &V) {
-		let mut hasher = XxHash::default();
+		// xxhash3 (64-bit) hasher
+		let mut hasher = Xxh3::default();
 		value.hash(&mut hasher);
 		let x = hasher.finish();
+
 		let j = x & (self.m.len() as u64 - 1);
 		let w = x >> self.p;
 		let rho = Self::get_rho(w, 64 - self.p);
@@ -182,14 +213,34 @@ where
 		let new = cmp::max(old, rho);
 		self.zero -= if old == 0 { 1 } else { 0 };
 
-		// see pow_bithack()
-		self.sum -= f64::from_bits(u64::max_value().wrapping_sub(u64::from(old)) << 54 >> 2)
-			- f64::from_bits(u64::max_value().wrapping_sub(u64::from(new)) << 54 >> 2);
+		// accumulate 2^-register via bit trick.
+		self.sum -= f64::from_bits(u64::MAX.wrapping_sub(u64::from(old)) << 54 >> 2)
+			- f64::from_bits(u64::MAX.wrapping_sub(u64::from(new)) << 54 >> 2);
+
+		*mjr = new;
+	}
+	/// Update HLL with an already-uniform 64-bit hash
+	pub fn push_hash64(&mut self, x: u64) {
+		let j = (x & ((self.m.len() as u64) - 1)) as usize;
+		let w = x >> self.p;
+		let rho = Self::get_rho(w, 64 - self.p);
+
+		let mjr = &mut self.m[j];
+		let old = *mjr;
+		let new = old.max(rho);
+
+		if old == 0 {
+			self.zero -= 1;
+		}
+
+		// subtract 2^-old and add 2^-new (same bithack used in `push`)
+		self.sum -= f64::from_bits(u64::MAX.wrapping_sub(old as u64) << 54 >> 2)
+			- f64::from_bits(u64::MAX.wrapping_sub(new as u64) << 54 >> 2);
 
 		*mjr = new;
 	}
 
-	/// Retrieve an estimate of the carginality of the stream.
+	/// Estimated cardinality.
 	pub fn len(&self) -> f64 {
 		let v = self.zero;
 		if v > 0 {
@@ -202,136 +253,80 @@ where
 		self.ep()
 	}
 
-	/// Returns true if empty.
+	/// Is empty?
+	#[inline]
 	pub fn is_empty(&self) -> bool {
 		self.zero == self.m.len()
 	}
 
-	/// Merge another HyperLogLog data structure into `self`.
-	///
-	/// This is the same as an HLL approximating cardinality of the union of two multisets.
+	/// Merge (union) another HLL into `self`.
 	pub fn union(&mut self, src: &Self) {
 		assert_eq!(src.alpha, self.alpha);
 		assert_eq!(src.p, self.p);
 		assert_eq!(src.m.len(), self.m.len());
-		#[cfg(all(
-			feature = "packed_simd",
-			any(target_arch = "x86", target_arch = "x86_64")
-		))]
+
+		// SIMD path (portable)
+		#[cfg(feature = "stdsimd")]
 		{
-			assert_eq!(self.m.len() % u8s::lanes(), 0); // TODO: high error rate can trigger this
-			assert_eq!(u8s::lanes(), f32s::lanes() * 4);
-			assert_eq!(f32s::lanes(), u32s::lanes());
-			assert_eq!(u8sq::lanes(), u32s::lanes());
-			let mut zero = u8s_sad_out::splat(0);
-			let mut sum = f32s::splat(0.0);
-			for i in (0..self.m.len()).step_by(u8s::lanes()) {
-				unsafe {
-					let self_m = u8s::from_slice_unaligned_unchecked(self.m.get_unchecked(i..));
-					let src_m = u8s::from_slice_unaligned_unchecked(src.m.get_unchecked(i..));
-					let res = self_m.max(src_m);
-					res.write_to_slice_unaligned_unchecked(self.m.get_unchecked_mut(i..));
-					let count: u8s = u8s::splat(0) - u8s::from_bits(res.eq(u8s::splat(0)));
-					let count2 = Sad::<u8s>::sad(count, u8s::splat(0));
-					zero += count2;
-					for j in 0..4 {
-						let x = u8sq::from_slice_unaligned_unchecked(
-							self.m.get_unchecked(i + j * u8sq::lanes()..),
-						);
-						let x: u32s = x.cast();
-						let x: f32s = ((u32s::splat(u32::max_value()) - x) << 25 >> 2).into_bits();
-						sum += x;
-					}
-				}
-			}
-			self.zero = usize::try_from(zero.wrapping_sum()).unwrap();
-			self.sum = f64::from(sum.sum());
-			// https://github.com/AdamNiederer/faster/issues/37
-			// (src.m.simd_iter(faster::u8s(0)),self.m.simd_iter_mut(faster::u8s(0))).zip()
+			let (zero, sum) = simd_union_assign(&mut self.m, &src.m);
+			self.zero = zero;
+			self.sum = sum;
+			return;
 		}
-		#[cfg(not(all(
-			feature = "packed_simd",
-			any(target_arch = "x86", target_arch = "x86_64")
-		)))]
+
+		// Scalar fallback
+		#[cfg(not(feature = "stdsimd"))]
 		{
-			let mut zero = 0;
-			let mut sum = 0.0;
+			let mut zero = 0usize;
+			let mut sum = 0.0f64;
 			for (to, from) in self.m.iter_mut().zip(src.m.iter()) {
 				*to = (*to).max(*from);
 				zero += if *to == 0 { 1 } else { 0 };
-				sum += f64::from_bits(u64::max_value().wrapping_sub(u64::from(*to)) << 54 >> 2);
+				sum += f64::from_bits(u64::MAX.wrapping_sub(u64::from(*to)) << 54 >> 2);
 			}
 			self.zero = zero;
 			self.sum = sum;
 		}
 	}
 
-	/// Intersect another HyperLogLog data structure into `self`.
-	///
-	/// Note: This is different to an HLL approximating cardinality of the intersection of two multisets.
+	/// Intersect registers (lane-wise min). **Note:** not a set-intersection estimator.
 	pub fn intersect(&mut self, src: &Self) {
 		assert_eq!(src.alpha, self.alpha);
 		assert_eq!(src.p, self.p);
 		assert_eq!(src.m.len(), self.m.len());
-		#[cfg(all(
-			feature = "packed_simd",
-			any(target_arch = "x86", target_arch = "x86_64")
-		))]
+
+		// SIMD path (portable)
+		#[cfg(feature = "stdsimd")]
 		{
-			assert_eq!(self.m.len() % u8s::lanes(), 0);
-			assert_eq!(u8s::lanes(), f32s::lanes() * 4);
-			assert_eq!(f32s::lanes(), u32s::lanes());
-			assert_eq!(u8sq::lanes(), u32s::lanes());
-			let mut zero = u8s_sad_out::splat(0);
-			let mut sum = f32s::splat(0.0);
-			for i in (0..self.m.len()).step_by(u8s::lanes()) {
-				unsafe {
-					let self_m = u8s::from_slice_unaligned_unchecked(self.m.get_unchecked(i..));
-					let src_m = u8s::from_slice_unaligned_unchecked(src.m.get_unchecked(i..));
-					let res = self_m.min(src_m);
-					res.write_to_slice_unaligned_unchecked(self.m.get_unchecked_mut(i..));
-					let count: u8s = u8s::splat(0) - u8s::from_bits(res.eq(u8s::splat(0)));
-					let count2 = Sad::<u8s>::sad(count, u8s::splat(0));
-					zero += count2;
-					for j in 0..4 {
-						let x = u8sq::from_slice_unaligned_unchecked(
-							self.m.get_unchecked(i + j * u8sq::lanes()..),
-						);
-						let x: u32s = x.cast();
-						let x: f32s = ((u32s::splat(u32::max_value()) - x) << 25 >> 2).into_bits();
-						sum += x;
-					}
-				}
-			}
-			self.zero = usize::try_from(zero.wrapping_sum()).unwrap();
-			self.sum = f64::from(sum.sum());
+			let (zero, sum) = simd_intersect_assign(&mut self.m, &src.m);
+			self.zero = zero;
+			self.sum = sum;
+			return;
 		}
-		#[cfg(not(all(
-			feature = "packed_simd",
-			any(target_arch = "x86", target_arch = "x86_64")
-		)))]
+
+		// Scalar fallback
+		#[cfg(not(feature = "stdsimd"))]
 		{
-			let mut zero = 0;
-			let mut sum = 0.0;
+			let mut zero = 0usize;
+			let mut sum = 0.0f64;
 			for (to, from) in self.m.iter_mut().zip(src.m.iter()) {
 				*to = (*to).min(*from);
 				zero += if *to == 0 { 1 } else { 0 };
-				sum += f64::from_bits(u64::max_value().wrapping_sub(u64::from(*to)) << 54 >> 2);
+				sum += f64::from_bits(u64::MAX.wrapping_sub(u64::from(*to)) << 54 >> 2);
 			}
 			self.zero = zero;
 			self.sum = sum;
 		}
 	}
 
-	/// Clears the `HyperLogLog` data structure, as if it was new.
+	/// Reset to the empty state.
 	pub fn clear(&mut self) {
 		self.zero = self.m.len();
 		self.sum = usize_to_f64(self.m.len());
-		self.m.iter_mut().for_each(|x| {
-			*x = 0;
-		});
+		self.m.iter_mut().for_each(|x| *x = 0);
 	}
 
+	#[inline]
 	fn get_threshold(p: u8) -> f64 {
 		TRESHOLD_DATA[p as usize]
 	}
@@ -346,6 +341,7 @@ where
 		}
 	}
 
+	#[inline]
 	fn get_rho(w: u64, max_width: u8) -> u8 {
 		let rho = max_width - (64 - u8::try_from(w.leading_zeros()).unwrap()) + 1;
 		assert!(0 < rho && rho < 65);
@@ -357,6 +353,67 @@ where
 		let neighbors = Self::get_nearest_neighbors(e, RAW_ESTIMATE_DATA[(p - 4) as usize]);
 		assert_eq!(neighbors.len(), 6);
 		bias_vector[neighbors].iter().sum::<f64>() / 6.0_f64
+	}
+
+	#[cfg(feature = "serde")]
+	/// Serialize this HLL to a writer using bincode.
+	pub fn save<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
+		bincode::serialize_into(&mut writer, &self)
+			.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+	}
+
+	#[cfg(feature = "serde")]
+	/// Load an HLL from a reader using bincode, with basic validation.
+	pub fn load<R: std::io::Read>(mut reader: R) -> std::io::Result<Self> {
+		use bincode::ErrorKind as BinErr;
+		use std::io;
+
+		// 1) Deserialize and propagate IO kinds (including UnexpectedEof)
+		let mut sketch: Self = match bincode::deserialize_from::<_, Self>(&mut reader) {
+			Ok(s) => s,
+			Err(e) => {
+				match *e {
+					BinErr::Io(ref ioe) => {
+						// Recreate an io::Error with the same kind & message.
+						return Err(io::Error::new(ioe.kind(), ioe.to_string()));
+					}
+					_ => {
+						// Non-IO bincode error.
+						return Err(io::Error::new(io::ErrorKind::Other, e));
+					}
+				}
+			}
+		};
+
+		// 2) Validate p and register length
+		if !(4..=16).contains(&sketch.p) {
+			return Err(io::Error::new(
+				io::ErrorKind::InvalidData,
+				format!("invalid p={} (expected 4..=16)", sketch.p),
+			));
+		}
+		let expected_m = 1usize << sketch.p;
+		if sketch.m.len() != expected_m {
+			return Err(io::Error::new(
+				io::ErrorKind::InvalidData,
+				format!(
+					"state length {} does not match 2^p ({})",
+					sketch.m.len(),
+					expected_m
+				),
+			));
+		}
+
+		// 3) Recompute derived fields from the registers
+		sketch.alpha = Self::get_alpha(sketch.p);
+		sketch.zero = sketch.m.iter().filter(|&&r| r == 0).count();
+		sketch.sum = sketch
+			.m
+			.iter()
+			.map(|&r| f64::from_bits(u64::MAX.wrapping_sub(r as u64) << 54 >> 2))
+			.sum::<f64>();
+
+		Ok(sketch)
 	}
 
 	fn get_nearest_neighbors(e: f64, estimate_vector: &[f64]) -> Range<usize> {
@@ -374,7 +431,6 @@ where
 					*estimate_vector.get_unchecked(max - 1),
 				)
 			};
-			// assert!(min_val <= e && e <= max_val);
 			if 2.0 * e - min_val > max_val {
 				min += 1;
 			} else {
@@ -385,8 +441,10 @@ where
 		min..max
 	}
 
+	#[inline]
 	fn ep(&self) -> f64 {
-		let e = self.alpha * usize_to_f64(self.m.len() * self.m.len()) / self.sum;
+		let m = usize_to_f64(self.m.len());
+		let e = self.alpha * m * m / self.sum;
 		if e <= usize_to_f64(5 * self.m.len()) {
 			e - Self::estimate_bias(e, self.p)
 		} else {
@@ -435,9 +493,7 @@ where
 		Self: Sized + 'a,
 	{
 		let mut ret = iter.next()?.clone();
-		iter.for_each(|x| {
-			ret.intersect(x);
-		});
+		iter.for_each(|x| ret.intersect(x));
 		Some(ret)
 	}
 }
@@ -469,134 +525,117 @@ impl<V: ?Sized> IntersectPlusUnionIsPlus for HyperLogLog<V> {
 	const VAL: bool = true;
 }
 
-#[cfg(all(
-	feature = "packed_simd",
-	any(target_arch = "x86", target_arch = "x86_64")
-))]
-mod simd {
-	pub use packed_simd::{self, Cast, FromBits, IntoBits};
-	use std::marker::PhantomData;
+#[cfg(feature = "stdsimd")]
+mod simd_portable {
+	use std::simd::{
+		num::SimdUint, prelude::{SimdFloat, SimdOrd, SimdPartialEq}, Simd
+	};
 
-	#[cfg(target_feature = "avx512bw")] // TODO
-	mod simd_types {
-		use super::packed_simd;
-		pub type u8s = packed_simd::u8x64;
-		pub type u8s_sad_out = packed_simd::u64x8;
-		pub type f32s = packed_simd::f32x16;
-		pub type u32s = packed_simd::u32x16;
-		pub type u8sq = packed_simd::u8x16;
-	}
-	#[cfg(target_feature = "avx2")]
-	mod simd_types {
-		#![allow(non_camel_case_types)]
-		use super::packed_simd;
-		pub type u8s = packed_simd::u8x32;
-		pub type u8s_sad_out = packed_simd::u64x4;
-		pub type f32s = packed_simd::f32x8;
-		pub type u32s = packed_simd::u32x8;
-		pub type u8sq = packed_simd::u8x8;
-	}
-	#[cfg(all(not(target_feature = "avx2"), target_feature = "sse2"))]
-	mod simd_types {
-		#![allow(non_camel_case_types)]
-		use super::packed_simd;
-		pub type u8s = packed_simd::u8x16;
-		pub type u8s_sad_out = packed_simd::u64x2;
-		pub type f32s = packed_simd::f32x4;
-		pub type u32s = packed_simd::u32x4;
-		pub type u8sq = packed_simd::u8x4;
-	}
-	#[cfg(all(not(target_feature = "avx2"), not(target_feature = "sse2")))]
-	mod simd_types {
-		#![allow(non_camel_case_types)]
-		use super::packed_simd;
-		pub type u8s = packed_simd::u8x8;
-		pub type u8s_sad_out = u64;
-		pub type f32s = packed_simd::f32x2;
-		pub type u32s = packed_simd::u32x2;
-		pub type u8sq = packed_simd::u8x2;
-	}
-	pub use self::simd_types::{f32s, u32s, u8s, u8s_sad_out, u8sq};
+	const LANES: usize = 64;
 
-	pub struct Sad<X>(PhantomData<fn(X)>);
-	#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-	mod x86 {
-		#[cfg(target_arch = "x86")]
-		pub use std::arch::x86::*;
-		#[cfg(target_arch = "x86_64")]
-		pub use std::arch::x86_64::*;
+	#[inline]
+	fn powbits_sum_f32(v: Simd<u8, LANES>) -> f64 {
+		// ((u32::MAX - x) << 25) >> 2  -> reinterpret as f32, then sum
+		let x_u32: Simd<u32, LANES> = v.cast();
+		let t = ((Simd::splat(u32::MAX) - x_u32) << Simd::splat(25)) >> Simd::splat(2);
+		let f: Simd<f32, LANES> = Simd::from_bits(t);
+		f.reduce_sum() as f64
 	}
-	// TODO
-	// #[cfg(target_feature = "avx512bw")]
-	// impl Sad<packed_simd::u8x64> {
-	// 	#[inline]
-	// 	#[target_feature(enable = "avx512bw")]
-	// 	pub unsafe fn sad(a: packed_simd::u8x64, b: packed_simd::u8x64) -> packed_simd::u64x8 {
-	// 		use std::mem::transmute;
-	// 		packed_simd::Simd(transmute(x86::_mm512_sad_epu8(transmute(a.0), transmute(b.0))))
-	// 	}
-	// }
-	#[cfg(target_feature = "avx2")]
-	impl Sad<packed_simd::u8x32> {
-		#[inline]
-		#[target_feature(enable = "avx2")]
-		pub unsafe fn sad(a: packed_simd::u8x32, b: packed_simd::u8x32) -> packed_simd::u64x4 {
-			use std::mem::transmute;
-			packed_simd::Simd(transmute(x86::_mm256_sad_epu8(
-				transmute(a.0),
-				transmute(b.0),
-			)))
-		}
+
+	#[inline]
+	fn zero_lanes(v: Simd<u8, LANES>) -> usize {
+		let m = v.simd_eq(Simd::splat(0));
+		m.to_bitmask().count_ones() as usize
 	}
-	#[cfg(target_feature = "sse2")]
-	impl Sad<packed_simd::u8x16> {
-		#[inline]
-		#[target_feature(enable = "sse2")]
-		pub unsafe fn sad(a: packed_simd::u8x16, b: packed_simd::u8x16) -> packed_simd::u64x2 {
-			use std::mem::transmute;
-			packed_simd::Simd(transmute(x86::_mm_sad_epu8(transmute(a.0), transmute(b.0))))
+
+	/// Lane-wise max (union) and recompute zero/sum.
+	pub fn simd_union_assign(a: &mut [u8], b: &[u8]) -> (usize, f64) {
+		let (a_chunks, a_rem) = a.as_chunks_mut::<LANES>();
+		let (b_chunks, b_rem) = b.as_chunks::<LANES>();
+		let mut zero = 0usize;
+		let mut sum = 0.0f64;
+
+		for (aa, bb) in a_chunks.iter_mut().zip(b_chunks.iter()) {
+			let av = Simd::<u8, LANES>::from_array(*aa);
+			let bv = Simd::<u8, LANES>::from_array(*bb);
+			let rv = av.simd_max(bv);
+			zero += zero_lanes(rv);
+			sum += powbits_sum_f32(rv);
+			*aa = rv.to_array();
 		}
+
+		for (to, from) in a_rem.iter_mut().zip(b_rem.iter()) {
+			let v = (*to).max(*from);
+			*to = v;
+			if v == 0 {
+				zero += 1;
+			}
+			sum += f64::from_bits(u64::MAX.wrapping_sub(u64::from(v)) << 54 >> 2);
+		}
+
+		(zero, sum)
 	}
-	#[cfg(target_feature = "sse,mmx")]
-	impl Sad<packed_simd::u8x8> {
-		#[inline]
-		#[target_feature(enable = "sse,mmx")]
-		pub unsafe fn sad(a: packed_simd::u8x8, b: packed_simd::u8x8) -> u64 {
-			use std::mem::transmute;
-			transmute(x86::_mm_sad_pu8(transmute(a.0), transmute(b.0)))
+
+	/// Lane-wise min (intersect) and recompute zero/sum.
+	pub fn simd_intersect_assign(a: &mut [u8], b: &[u8]) -> (usize, f64) {
+		let (a_chunks, a_rem) = a.as_chunks_mut::<LANES>();
+		let (b_chunks, b_rem) = b.as_chunks::<LANES>();
+		let mut zero = 0usize;
+		let mut sum = 0.0f64;
+
+		for (aa, bb) in a_chunks.iter_mut().zip(b_chunks.iter()) {
+			let av = Simd::<u8, LANES>::from_array(*aa);
+			let bv = Simd::<u8, LANES>::from_array(*bb);
+			let rv = av.simd_min(bv);
+			zero += zero_lanes(rv);
+			sum += powbits_sum_f32(rv);
+			*aa = rv.to_array();
 		}
-	}
-	#[cfg(not(target_feature = "sse,mmx"))]
-	impl Sad<packed_simd::u8x8> {
-		#[inline(always)]
-		pub unsafe fn sad(a: packed_simd::u8x8, b: packed_simd::u8x8) -> u64 {
-			assert_eq!(b, packed_simd::u8x8::splat(0));
-			(0..8).map(|i| u64::from(a.extract(i))).sum()
+
+		for (to, from) in a_rem.iter_mut().zip(b_rem.iter()) {
+			let v = (*to).min(*from);
+			*to = v;
+			if v == 0 {
+				zero += 1;
+			}
+			sum += f64::from_bits(u64::MAX.wrapping_sub(u64::from(v)) << 54 >> 2);
 		}
+
+		(zero, sum)
 	}
 }
-#[cfg(all(
-	feature = "packed_simd",
-	any(target_arch = "x86", target_arch = "x86_64")
-))]
-use simd::{f32s, u32s, u8s, u8s_sad_out, u8sq, Cast, FromBits, IntoBits, Sad};
+
+// Bring the SIMD functions into the parent module’s scope when enabled:
+#[cfg(feature = "stdsimd")]
+use simd_portable::{simd_intersect_assign, simd_union_assign};
 
 #[cfg(test)]
 mod test {
 	use super::{super::f64_to_usize, HyperLogLog};
-	use std::f64;
-
+	#[cfg(feature = "serde")]
+	use std::io::Write;
 	#[test]
 	fn pow_bithack() {
-		// build the float from x, manipulating it to be the mantissa we want.
-		// no portability issues in theory https://doc.rust-lang.org/stable/std/primitive.f64.html#method.from_bits
 		for x in 0_u8..65 {
 			let a = 2.0_f64.powi(-(i32::from(x)));
-			let b = f64::from_bits(u64::max_value().wrapping_sub(u64::from(x)) << 54 >> 2);
-			let c = f32::from_bits(u32::max_value().wrapping_sub(u32::from(x)) << 25 >> 2);
+			let b = f64::from_bits(u64::MAX.wrapping_sub(u64::from(x)) << 54 >> 2);
+			let c = f32::from_bits(u32::MAX.wrapping_sub(u32::from(x)) << 25 >> 2);
 			assert_eq!(a, b);
 			assert_eq!(a, f64::from(c));
 		}
+	}
+
+	#[test]
+	fn hll_max_precision_estimate() {
+		let mut hll = HyperLogLog::<u64>::with_p(16);
+		// All registers at rank four put the estimate above the bias-correction
+		// range. Squaring 2^16 registers must also work on 32-bit targets.
+		hll.m.fill(4);
+		hll.zero = 0;
+		hll.sum = 4096.0;
+		let estimate = hll.len();
+		assert!(estimate.is_finite());
+		assert_eq!(estimate, hll.alpha * 1_048_576.0);
 	}
 
 	#[test]
@@ -641,10 +680,277 @@ mod test {
 		for i in 0..f64_to_usize(actual) {
 			hll.push(&i);
 		}
-
-		// assert_eq!(111013.12482663046, hll.len());
-
 		assert!(hll.len() > (actual - (actual * p * 3.0)));
 		assert!(hll.len() < (actual + (actual * p * 3.0)));
+	}
+	#[test]
+	fn push_hash64() {
+		use std::hash::{Hash, Hasher};
+		use xxhash_rust::xxh3::Xxh3;
+
+		// Same precision for both sketches
+		let mut h_from_val = HyperLogLog::new(0.01);
+		let mut h_from_hash = HyperLogLog::new_from(&h_from_val);
+
+		// Feed 10k distinct items both ways:
+		//  - h_from_val: via `push(&value)` (internally hashes with Xxh3)
+		//  - h_from_hash: via `push_hash64(x)` where x is the same Xxh3 hash
+		for i in 0u64..10_000 {
+			let mut hasher = Xxh3::default();
+			i.hash(&mut hasher);
+			let x = hasher.finish();
+
+			h_from_val.push(&i);
+			h_from_hash.push_hash64(x);
+		}
+
+		let a = h_from_val.len();
+		let b = h_from_hash.len();
+
+		// They should be identical (same registers updated in the same order).
+		assert!((a - b).abs() < f64::EPSILON, "len mismatch: a={a}, b={b}");
+		// Quick sanity: ballpark distinct count is close to 10k
+		assert!(a > 9000.0 && a < 11000.0, "unexpected estimate: {a}");
+	}
+	#[cfg(feature = "serde")]
+	#[test]
+	fn hll_save_and_load_roundtrip() {
+		use std::{
+			fs::{remove_file, File}, io::{BufReader, BufWriter}
+		};
+
+		// Build a sketch and feed it some items
+		let mut hll = HyperLogLog::with_p(12); // 4096 registers, ~1.6% RSE
+		for i in 0u64..10_000 {
+			hll.push(&i);
+		}
+		let est_before = hll.len();
+
+		// Save to disk
+		let path = "test_hll.bin";
+		{
+			let f = File::create(path).expect("create file");
+			let w = BufWriter::new(f);
+			hll.save(w).expect("save hll");
+		}
+
+		// Load back
+		let loaded = {
+			let f = File::open(path).expect("open file");
+			let r = BufReader::new(f);
+			HyperLogLog::<u8>::load(r).expect("load hll") // the V type is phantom; any V is fine
+		};
+
+		// Registers should match exactly
+		assert_eq!(loaded.p, hll.p);
+		assert_eq!(loaded.m.len(), hll.m.len());
+		assert_eq!(&*loaded.m, &*hll.m, "register arrays differ after load");
+
+		// Estimate should be (very) close; allow a tiny FP drift
+		let est_after = loaded.len();
+		let diff = (est_after - est_before).abs();
+		assert!(
+			diff <= 1e-12,
+			"estimate drift too large: before={est_before}, after={est_after}, diff={diff}"
+		);
+
+		remove_file(path).ok();
+	}
+	#[cfg(feature = "serde")]
+	#[test]
+	fn hll_save_two_then_load_back_streaming_cardinality() -> std::io::Result<()> {
+		use super::HyperLogLog;
+		use std::{
+			fs::{remove_file, File}, io::{BufReader, BufWriter}
+		};
+
+		// Two sketches with 2^12 registers
+		let mut s1 = HyperLogLog::<u64>::with_p(12);
+		let mut s2 = HyperLogLog::<u64>::with_p(12);
+
+		// s1: 0..10_000 (10k uniques)
+		for i in 0u64..10_000 {
+			s1.push(&i);
+		}
+		// s2: 5_000..15_000 (10k uniques), 5k overlap with s1
+		for i in 5_000u64..15_000 {
+			s2.push(&i);
+		}
+
+		// Ground-truth cardinalities
+		let t1 = 10_000.0;
+		let t2 = 10_000.0;
+		let tu = 15_000.0;
+		let rel_tol = 0.05; // 5% tolerance (>> ~1.6% RSE for p=12)
+
+		// Check before saving
+		let e1 = s1.len();
+		let e2 = s2.len();
+		let mut u = s1.clone();
+		u.union(&s2);
+		let eu = u.len();
+
+		assert!(
+			(e1 - t1).abs() <= t1 * rel_tol,
+			"s1 est={} truth={}",
+			e1,
+			t1
+		);
+		assert!(
+			(e2 - t2).abs() <= t2 * rel_tol,
+			"s2 est={} truth={}",
+			e2,
+			t2
+		);
+		assert!(
+			(eu - tu).abs() <= tu * rel_tol,
+			"union est={} truth={}",
+			eu,
+			tu
+		);
+
+		// Save both sketches back-to-back
+		let path = "test_hll_stream_two_card.bin";
+		{
+			let f = File::create(path)?;
+			let mut w = BufWriter::new(f);
+			s1.save(&mut w)?;
+			s2.save(&mut w)?;
+			w.flush()?;
+		}
+
+		// Load both back
+		let (s1b, s2b) = {
+			let f = File::open(path)?;
+			let mut r = BufReader::new(f);
+			let a = HyperLogLog::<u64>::load(&mut r)?;
+			let b = HyperLogLog::<u64>::load(&mut r)?;
+			(a, b)
+		};
+
+		// Check after loading (still close to truth)...
+		let e1b = s1b.len();
+		let e2b = s2b.len();
+		let mut ub = s1b.clone();
+		ub.union(&s2b);
+		let eub = ub.len();
+
+		assert!(
+			(e1b - t1).abs() <= t1 * rel_tol,
+			"s1(load) est={} truth={}",
+			e1b,
+			t1
+		);
+		assert!(
+			(e2b - t2).abs() <= t2 * rel_tol,
+			"s2(load) est={} truth={}",
+			e2b,
+			t2
+		);
+		assert!(
+			(eub - tu).abs() <= tu * rel_tol,
+			"union(load) est={} truth={}",
+			eub,
+			tu
+		);
+
+		// ...and unchanged by serialization
+		assert!((e1 - e1b).abs() < 1e-9, "s1 est changed by save/load");
+		assert!((e2 - e2b).abs() < 1e-9, "s2 est changed by save/load");
+		assert!((eu - eub).abs() < 1e-9, "union est changed by save/load");
+
+		remove_file(path).ok();
+		Ok(())
+	}
+
+	fn assert_hll_register_merges(left: &HyperLogLog<u64>, right: &HyperLogLog<u64>) {
+		for intersect in [false, true] {
+			let expected: Vec<u8> = left
+				.m
+				.iter()
+				.zip(right.m.iter())
+				.map(|(&a, &b)| if intersect { a.min(b) } else { a.max(b) })
+				.collect();
+			let expected_zero = expected.iter().filter(|&&rank| rank == 0).count();
+			let expected_sum: f64 = expected
+				.iter()
+				.map(|&rank| 2.0_f64.powi(-i32::from(rank)))
+				.sum();
+			let mut actual = left.clone();
+			if intersect {
+				actual.intersect(right);
+			} else {
+				actual.union(right);
+			}
+			assert_eq!(
+				&*actual.m, &*expected,
+				"p={}, intersect={intersect}",
+				left.p
+			);
+			assert_eq!(
+				actual.zero, expected_zero,
+				"p={}, intersect={intersect}",
+				left.p
+			);
+			// SIMD reduces each chunk in f32 before accumulating into f64.
+			assert!(
+				(actual.sum - expected_sum).abs() <= expected_sum * 1e-6,
+				"p={}, intersect={intersect}: sum={} expected={expected_sum}",
+				left.p,
+				actual.sum
+			);
+		}
+	}
+
+	#[test]
+	fn hll_merge_empty_registers() {
+		for p in [4, 5, 6, 10, 16] {
+			let empty = HyperLogLog::<u64>::with_p(p);
+			assert_hll_register_merges(&empty, &empty);
+		}
+	}
+
+	#[test]
+	fn hll_merge_mixed_registers() {
+		// With 64 lanes, p=4/5 uses only the scalar tail, p>=6 only full chunks.
+		for p in [4, 5, 6, 10, 16] {
+			let empty = HyperLogLog::<u64>::with_p(p);
+			let mut left = empty.clone();
+			let mut right = empty.clone();
+			let ranks = [0, 1, 2, 3, 24, 32, 48, 65 - p];
+			for (phase, sketch) in [(0, &mut left), (3, &mut right)] {
+				for (i, rank) in sketch.m.iter_mut().enumerate() {
+					*rank = if i % 11 == 0 {
+						0
+					} else {
+						ranks[(i * 5 + phase) % ranks.len()]
+					};
+				}
+				sketch.zero = sketch.m.iter().filter(|&&rank| rank == 0).count();
+				sketch.sum = sketch
+					.m
+					.iter()
+					.map(|&rank| 2.0_f64.powi(-i32::from(rank)))
+					.sum();
+			}
+			assert_hll_register_merges(&left, &right);
+			assert_hll_register_merges(&right, &left);
+			assert_hll_register_merges(&left, &left);
+			assert_hll_register_merges(&left, &empty);
+			assert_hll_register_merges(&empty, &right);
+		}
+	}
+
+	#[test]
+	fn hll_merge_hashed_registers() {
+		for p in [4, 5, 6, 10, 16] {
+			let mut left = HyperLogLog::<u64>::with_p(p);
+			let mut right = HyperLogLog::<u64>::with_p(p);
+			for value in 0..2048_u64 {
+				left.push(&value);
+				right.push(&(value + 1024));
+			}
+			assert_hll_register_merges(&left, &right);
+		}
 	}
 }
